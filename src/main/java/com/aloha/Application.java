@@ -1,6 +1,6 @@
 package com.aloha;
 
-import com.aloha.datamapping.DatabaseMapping;
+import com.aloha.datamapping.mapping.DatabaseMapping;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringApplication;
@@ -15,7 +15,7 @@ import java.util.List;
 public class Application implements ApplicationListener<ContextRefreshedEvent> {
 
     @Autowired
-    List<DatabaseMapping> mappings;
+    private List<DatabaseMapping> mappings;
 
     public static void main(String[] args) {
         SpringApplication.run(Application.class, args);
@@ -23,7 +23,7 @@ public class Application implements ApplicationListener<ContextRefreshedEvent> {
 
     @Override
     public void onApplicationEvent(ContextRefreshedEvent event) {
-        mappings.stream().forEach(mapping -> {
+        mappings.forEach(mapping -> {
             try {
                 mapping.map();
             } catch (Exception e) {

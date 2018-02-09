@@ -1,70 +1,101 @@
 package com.aloha.datamapping.generator;
 
-import com.aloha.datamapping.utils.Try;
-import com.mysql.cj.core.MysqlType;
-import lombok.AllArgsConstructor;
+import com.aloha.datamapping.mapping.DatabaseMapping;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import lombok.Data;
 import org.apache.tomcat.util.buf.StringUtils;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 @Data
-@AllArgsConstructor
 public class InsertSqlGenerator implements SqlGenerator {
 
-    private String tableName;
+    private String targetTableName;
 
     private Map<String, String> columnMapping;
 
+    private List<Map<String, Object>> databaseResult;
+
+    private LinkedList<String> targetColumnNames;
+
+    private Map<String, Integer> columnMetaData;
+
+    private DatabaseMapping databaseMapping;
+
+    public InsertSqlGenerator(String targetTableName, Map<String, String> columnMapping, DatabaseMapping databaseMapping) {
+        this.targetTableName = targetTableName;
+        this.columnMapping = columnMapping;
+        this.databaseMapping = databaseMapping;
+    }
+
     public String generate(ResultSet resultSet) throws SQLException {
-        List<String> sourceColumns = IntStream.rangeClosed(1, resultSet.getMetaData().getColumnCount()).boxed()
-                .map(Try.of(i -> resultSet.getMetaData().getColumnName(i))).collect(Collectors.toList());
-        Map<String, String> mappingColumns = getColumnMapping();
-        List<String> targetColumns;
-        if (mappingColumns == null) {
-            targetColumns = sourceColumns;
-        } else {
-            targetColumns = sourceColumns.stream().map(name -> {
-                String result = mappingColumns.get(name);
-                return result == null ? name : result;
-            }).collect(Collectors.toList());
-        }
+        this.columnMetaData = generateColumnMetaDate(resultSet);
+        this.targetColumnNames = generateTargetColumnNames(columnMetaData);
+        this.databaseResult = generateDatabaseResult(resultSet);
 
-        StringBuilder sb = new StringBuilder("INSERT INTO " + getTableName() + "( ");
-        sb.append(StringUtils.join(targetColumns, ','));
-        sb.append(") VALUES ");
+        String headers = getHeaderString();
 
-        String headers = sb.toString();
-
-        List<String> result = new ArrayList<>();
-        while (resultSet.next()) {
-            result.add(getRowString(resultSet));
-        }
+        List<String> result = databaseResult.stream().map(row -> {
+            this.databaseMapping.modifyRowValues(row);
+            List<String> sql = Lists.newArrayList();
+            for (String columnName : targetColumnNames) {
+                sql.add(row.get(columnName).toString());
+            }
+            return "(" + StringUtils.join(sql, ',') + ")";
+        }).collect(Collectors.toList());
         return result.stream().map(sql -> headers + sql + ";").reduce((sql1, sql2) -> sql1 + sql2).get();
     }
 
-    private String getRowString(ResultSet resultSet) {
-        try {
-            int count = resultSet.getMetaData().getColumnCount();
-            List<String> result = new ArrayList<>();
-            for (int i = 1; i <= count; i++) {
-                int type = resultSet.getMetaData().getColumnType(i);
-                if (type == MysqlType.VARCHAR.getJdbcType()) {
-                    result.add("\'" + resultSet.getObject(i) + "\'");
-                } else {
-                    result.add(resultSet.getObject(i).toString());
-                }
+    private String getHeaderString() {
+        StringBuilder stringBuilder = new StringBuilder();
+        stringBuilder.append("INSERT INTO " + getTargetTableName() + "( ");
+        stringBuilder.append(StringUtils.join(targetColumnNames, ','));
+        stringBuilder.append(") VALUES ");
+        return stringBuilder.toString();
+    }
+
+
+    private LinkedList<String> generateTargetColumnNames(Map<String, Integer> columnMetaData) {
+        LinkedList<String> columns = Lists.newLinkedList();
+        columnMetaData.forEach((k, v) -> {
+            columns.add(k);
+        });
+        return columns;
+    }
+
+    private List<Map<String, Object>> generateDatabaseResult(ResultSet resultSet) throws SQLException {
+        List<Map<String, Object>> result = Lists.newArrayList();
+        int columnCount = resultSet.getMetaData().getColumnCount();
+
+        while (resultSet.next()) {
+            Map<String, Object> row = Maps.newHashMap();
+            for (int i = 0; i < columnCount; i++) {
+                row.put(this.targetColumnNames.get(i), resultSet.getObject(i + 1));
             }
-            return "(" + StringUtils.join(result) + ")";
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+            result.add(row);
         }
+        return result;
+    }
+
+    private Map<String, Integer> generateColumnMetaDate(ResultSet resultSet) throws SQLException {
+        Map<String, String> mappingColumns = getColumnMapping();
+        Map<String, Integer> result = Maps.newLinkedHashMap();
+        int columnCount = resultSet.getMetaData().getColumnCount();
+        for (int i = 0; i < columnCount; i++) {
+            String columnName = resultSet.getMetaData().getColumnName(i + 1);
+            if (mappingColumns != null) {
+                String mappingColumn = mappingColumns.get(columnName);
+                columnName = mappingColumn == null ? columnName : mappingColumn;
+            }
+            result.put(columnName, resultSet.getMetaData().getColumnType(i + 1));
+        }
+        return result;
     }
 
     @Override

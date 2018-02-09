@@ -1,4 +1,4 @@
-package com.aloha.datamapping;
+package com.aloha.datamapping.mapping;
 
 @FunctionalInterface
 public interface Mapping {
